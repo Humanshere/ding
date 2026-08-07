@@ -66,9 +66,7 @@ def hash_object(args):
         print(hash_value)
 
 
-def cat_file(args):
-    oid=args.oid
-
+def decompress(oid):
     repo_path=find_repo(os.getcwd())
     if repo_path is None:
         print("could not find repo base folder. Make sure to run ding init first.")
@@ -85,7 +83,12 @@ def cat_file(args):
         return
 
     content=zstd.decompress(compressed).decode("utf-8")
-    print(content)
+    return content
+
+def cat_file(args):
+    oid=args.oid
+    print(decompress(oid))
+    
 
 
 def add(args):
@@ -135,12 +138,13 @@ def commit(args):
     relative_path = branch.replace("ref: ", "", 1)
     parent_path = os.path.join(repo_path, *relative_path.split("/"))
 
+    parent_hash=None
     if os.path.isfile(parent_path):
         with open(parent_path,'r') as f:
-                parent_hash=f.read()
+            parent_hash=f.read()
     hash_value=write_tree(args)
     commit_content=f"tree {hash_value}\n"
-    if parent_path:
+    if parent_hash:
         commit_content+=f"parent {parent_hash}\n"
     commit_content+=f"author Not implemented\n\n {args.message}"
     commit_hash=store_content(commit_content.encode("utf-8"))
@@ -148,3 +152,101 @@ def commit(args):
     with open(parent_path,'w') as f:
         f.write(commit_hash)
     print(commit_hash)
+
+
+def log(args):
+    repo_path=find_repo(os.getcwd())
+    if repo_path is None:
+            print("could not find repo base folder. Make sure to run ding init first.")
+            return
+    pointer_file=os.path.join(repo_path,"HEAD")
+    with open(pointer_file,'r') as f:
+        branch=f.read()
+
+    relative_path = branch.replace("ref: ", "", 1)
+    parent_path = os.path.join(repo_path, *relative_path.split("/"))
+
+    parent_hash=None
+    if os.path.isfile(parent_path):
+        with open(parent_path,'r') as f:
+            parent_hash=f.read()
+    else:
+        print("No commits yet")
+
+    objects_folder=os.path.join(repo_path,"objects")
+    while parent_hash:
+        content=decompress(parent_hash)
+        print(parent_hash)
+        print(content)
+        words = content.split()
+        keyword="parent"
+        if keyword in words:
+            idx = words.index(keyword)
+            parent_hash = words[idx + 1] if idx + 1 < len(words) else None
+        else:
+            parent_hash = None
+   
+
+def branch(args):
+    repo_path=find_repo(os.getcwd())
+    if repo_path is None:
+            print("could not find repo base folder. Make sure to run ding init first.")
+            return
+    pointer_file=os.path.join(repo_path,"HEAD")
+    with open(pointer_file,'r') as f:
+        branch=f.read()
+
+    relative_path = branch.replace("ref: ", "", 1)
+    branch_path = os.path.join(repo_path, *relative_path.split("/"))
+
+    commit_hash=None
+    if os.path.isfile(branch_path):
+        with open(branch_path,'r') as f:
+            commit_hash=f.read()
+
+    if not commit_hash:
+        print("Fatal: Main can't be empty, make a commit first")
+        return
+
+
+    branch_file=os.path.join(repo_path,"refs","heads",args.branch_name)
+    with open(branch_file,'w') as f:
+        f.write(commit_hash)
+
+def checkout(args):
+    repo_path=find_repo(os.getcwd())
+    if repo_path is None:
+        print("could not find repo base folder. Make sure to run ding init first.")
+        return
+    branch_file=os.path.join(repo_path,"refs","heads",args.branch_name)
+    if not os.path.isfile(branch_file):
+        print("branch with name "+args.branch_name+" does not exist")
+        return 
+    with open(branch_file,'r') as f:
+        commit_hash=f.read()   
+
+    pointer_file=os.path.join(repo_path,"HEAD")
+    with open(pointer_file,'w') as f:
+        f.write("ref: refs/heads/"+args.branch_name)
+
+    content=decompress(commit_hash)
+    words = content.split()
+    keyword="tree"
+    if keyword in words:
+        idx = words.index(keyword)
+        tree_hash = words[idx + 1] if idx + 1 < len(words) else None
+    else:
+        tree_hash = None
+
+    new_tree=json.loads(decompress(tree_hash))
+
+    for filepath, blob_hash in new_tree.items():
+        new_content=decompress(blob_hash)
+        with open(filepath, 'w') as new_file:
+            new_file.write(new_content)    
+
+    index_file=os.path.join(repo_path,"index")
+    with open(index_file,'w')as f:
+        json.dump(new_tree,f,indent=4)
+
+    print(f"Switched to branch '{args.branch_name}'")

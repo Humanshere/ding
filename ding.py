@@ -30,6 +30,17 @@ commit_parser=subparser.add_parser("commit")
 commit_parser.add_argument("-m", "--message", required=True, help="Commit message")
 commit_parser.set_defaults(func=data.commit)
 
+log_parser=subparser.add_parser("log")
+log_parser.set_defaults(func=data.log)
+
+branch_parser=subparser.add_parser("branch")
+branch_parser.add_argument("branch_name")
+branch_parser.set_defaults(func=data.branch)
+
+checkout_parser=subparser.add_parser("checkout")
+checkout_parser.add_argument("branch_name")
+checkout_parser.set_defaults(func=data.checkout)
+
 args=parser.parse_args()
 
 if hasattr(args, "func"):
