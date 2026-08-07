@@ -1,3 +1,4 @@
+import json
 import os
 import hashlib
 import compression.zstd as zstd
@@ -28,9 +29,7 @@ def find_repo(curr_dir):
         return find_repo(parent)
 
 
-
-def hash_object(args):
-    filename=args.file
+def store_object(filename):
     with open(filename,"rb") as file:
         content= file.read()
 
@@ -40,12 +39,22 @@ def hash_object(args):
     repo_path=find_repo(os.getcwd())
     if repo_path is None:
         print("could not find repo base folder. Make sure to run ding init first.")
-        return
+        return None
     objects_folder=os.path.join(repo_path, "objects")
-    object_file=os.path.join(objects_folder, hash_value)
+    objects_subfolder=os.path.join(objects_folder, hash_value[:2])
+    os.makedirs(objects_subfolder,exist_ok=True)
+    object_file=os.path.join(objects_subfolder,hash_value[2:])
     with open(object_file,"wb") as file:
         file.write(compressed)
-    print(hash_value)
+    return hash_value
+
+
+
+def hash_object(args):
+    filename=args.file
+    hash_value=store_object(filename)
+    if hash_value:
+        print(hash_value)
 
 
 def cat_file(args):
@@ -56,8 +65,9 @@ def cat_file(args):
         print("could not find repo base folder. Make sure to run ding init first.")
         return
     objects_folder=os.path.join(repo_path, "objects")
-    object_file=os.path.join(objects_folder, oid)
-
+    objects_subfolder=os.path.join(objects_folder, oid[:2])
+    object_file=os.path.join(objects_subfolder,oid[2:])
+    
     if(os.path.isfile(object_file)):
         with open(object_file,"rb") as file:
                 compressed= file.read()
@@ -67,3 +77,22 @@ def cat_file(args):
 
     content=zstd.decompress(compressed).decode("utf-8")
     print(content)
+
+
+def add(args):
+    filename=args.file
+    hash_value=store_object(filename)
+    repo_path=find_repo(os.getcwd())
+    if repo_path is None:
+        print("could not find repo base folder. Make sure to run ding init first.")
+        return
+    index_file=os.path.join(repo_path,"index")
+    index_data={}
+    if os.path.isfile(index_file):
+        with open(index_file,'r')as json_file:
+            index_data=json.load(json_file)
+
+    index_data[filename]=hash_value
+
+    with open(index_file,'w')as json_file:
+        json.dump(index_data,json_file,indent=4)
