@@ -13,8 +13,13 @@ def init(args):
         return
     refs_folder=os.path.join(ding_folder, "refs")
     objects_folder=os.path.join(ding_folder, "objects")
+    heads_folder=os.path.join(refs_folder,"heads")
     os.makedirs(refs_folder, exist_ok=True)
     os.makedirs(objects_folder, exist_ok=True)
+    os.makedirs(heads_folder, exist_ok=True)
+    head_file=os.path.join(ding_folder,"HEAD")
+    with open(head_file,'w') as f:
+        f.write("ref: refs/heads/main")
     print("Initialized empty repository")
 
 
@@ -29,10 +34,7 @@ def find_repo(curr_dir):
         return find_repo(parent)
 
 
-def store_object(filename):
-    with open(filename,"rb") as file:
-        content= file.read()
-
+def store_content(content):
     hash_value=hashlib.sha1(content).hexdigest()
     compressed = zstd.compress(content, level=3)
 
@@ -48,11 +50,18 @@ def store_object(filename):
         file.write(compressed)
     return hash_value
 
+def store_file(filename):
+    with open(filename,"rb") as file:
+        content= file.read()
+
+    hash_value=store_content(content)
+    return hash_value
+
 
 
 def hash_object(args):
     filename=args.file
-    hash_value=store_object(filename)
+    hash_value=store_file(filename)
     if hash_value:
         print(hash_value)
 
@@ -81,7 +90,7 @@ def cat_file(args):
 
 def add(args):
     filename=args.file
-    hash_value=store_object(filename)
+    hash_value=store_file(filename)
     repo_path=find_repo(os.getcwd())
     if repo_path is None:
         print("could not find repo base folder. Make sure to run ding init first.")
@@ -96,3 +105,46 @@ def add(args):
 
     with open(index_file,'w')as json_file:
         json.dump(index_data,json_file,indent=4)
+
+def write_tree(args):
+    repo_path=find_repo(os.getcwd())
+    if repo_path is None:
+        print("could not find repo base folder. Make sure to run ding init first.")
+        return
+    index_file=os.path.join(repo_path,"index")
+    if not os.path.isfile(index_file):
+        print("Nothing to commit (index is empty).")
+        return
+
+    hash_value=store_file(index_file)
+    print(hash_value)
+    return hash_value
+
+
+def commit(args):
+    repo_path=find_repo(os.getcwd())
+    if repo_path is None:
+            print("could not find repo base folder. Make sure to run ding init first.")
+            return
+    refs_folder=os.path.join(repo_path, "refs")
+    heads_folder=os.path.join(refs_folder,"heads")
+    pointer_file=os.path.join(repo_path,"HEAD")
+    with open(pointer_file,'r') as f:
+        branch=f.read()
+
+    relative_path = branch.replace("ref: ", "", 1)
+    parent_path = os.path.join(repo_path, *relative_path.split("/"))
+
+    if os.path.isfile(parent_path):
+        with open(parent_path,'r') as f:
+                parent_hash=f.read()
+    hash_value=write_tree(args)
+    commit_content=f"tree {hash_value}\n"
+    if parent_path:
+        commit_content+=f"parent {parent_hash}\n"
+    commit_content+=f"author Not implemented\n\n {args.message}"
+    commit_hash=store_content(commit_content.encode("utf-8"))
+
+    with open(parent_path,'w') as f:
+        f.write(commit_hash)
+    print(commit_hash)

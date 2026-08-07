@@ -21,6 +21,15 @@ cat_file_parser=subparser.add_parser("cat-file")
 cat_file_parser.add_argument("oid")
 cat_file_parser.set_defaults(func=data.cat_file)
 
+
+write_tree_parser=subparser.add_parser("write-tree")
+write_tree_parser.set_defaults(func=data.write_tree)
+
+
+commit_parser=subparser.add_parser("commit")
+commit_parser.add_argument("-m", "--message", required=True, help="Commit message")
+commit_parser.set_defaults(func=data.commit)
+
 args=parser.parse_args()
 
 if hasattr(args, "func"):
