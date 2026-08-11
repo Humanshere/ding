@@ -130,11 +130,14 @@ def cat_file(args):
 
 def add(args):
     filename=args.file
+    absolute_path=os.path.abspath(filename)
     hash_value=store_file(filename)
     repo_path=find_repo(os.getcwd())
     if repo_path is None:
         print("could not find repo base folder. Make sure to run ding init first.")
         return
+    repo_root = os.path.dirname(repo_path)
+    relative_path=os.path.relpath(absolute_path, repo_root)
     index_file=os.path.join(repo_path,"index")
     with acquire_lock(index_file):
         index_data={}
@@ -142,7 +145,7 @@ def add(args):
             with open(index_file,'r')as json_file:
                 index_data=json.load(json_file)
 
-        index_data[filename]=hash_value
+        index_data[relative_path]=hash_value
 
         atomic_write(index_file,index_data,False,True)
 
