@@ -277,14 +277,30 @@ def checkout(args):
         tree_hash = None
 
     new_tree=json.loads(decompress(tree_hash))
+    index_file=os.path.join(repo_path,"index")
+    curr_tree = {}
+    if os.path.exists(index_file):
+        with open(index_file) as f:
+            curr_tree=json.load(f)
 
+
+    files_to_add={}
     for filepath, blob_hash in new_tree.items():
+        if filepath not in curr_tree or blob_hash!=curr_tree[filepath]:
+            files_to_add[filepath]=blob_hash
+
+
+    for filepath in curr_tree:
+        if filepath not in new_tree:
+            os.remove(filepath)
+
+
+
+    for filepath, blob_hash in files_to_add.items():
         new_content=decompress(blob_hash)
         with open(filepath, 'w') as new_file:
             new_file.write(new_content)    
 
-    index_file=os.path.join(repo_path,"index")
-    if os.path.exists(index_file):
-        atomic_write(index_file,new_tree,is_json=True)
+    atomic_write(index_file,new_tree,is_json=True)
 
     print(f"Switched to branch '{args.branch_name}'")
