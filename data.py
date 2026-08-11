@@ -88,10 +88,32 @@ def store_content(content):
     return hash_value
 
 def store_file(filename):
-    with open(filename,"rb") as file:
-        content= file.read()
+    repo_path=find_repo(os.getcwd())
+    if repo_path is None:
+        print("could not find repo base folder. Make sure to run ding init first.")
+        return None
+    tmp_path = os.path.join(repo_path, "objects", f"tmp_obj_{os.getpid()}")
+    hasher = hashlib.sha1()
 
-    hash_value=store_content(content)
+    with open(filename,"rb") as file_in,zstd.open(tmp_path,"wb") as file_out:
+        while True:
+            chunk = file_in.read(4096 * 1024)
+            if chunk == b'':
+                break
+            hasher.update(chunk)
+            file_out.write(chunk)
+
+
+
+    hash_value = hasher.hexdigest()
+    objects_folder=os.path.join(repo_path, "objects")
+    objects_subfolder=os.path.join(objects_folder, hash_value[:2])
+    os.makedirs(objects_subfolder,exist_ok=True)
+    object_file=os.path.join(objects_subfolder,hash_value[2:])
+    if os.path.exists(object_file):
+        os.remove(tmp_path)
+    else:
+        os.replace(tmp_path, object_file)
     return hash_value
 
 
