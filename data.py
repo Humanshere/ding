@@ -24,6 +24,22 @@ def acquire_lock(file_path):
             os.remove(lock_path)
         
 
+def atomic_write(file_path,content,is_binary=False,is_json=False):
+    tmp_path= file_path+f".tmp.{os.getpid()}"
+    if is_binary:
+        mode="wb"
+    else:
+        mode="w"
+
+    with open(tmp_path,mode) as f:
+        if is_json:
+            json.dump(content,f,indent=4)
+        else:
+            f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path,file_path)
+
 
    
 def init(args):
@@ -67,8 +83,8 @@ def store_content(content):
     objects_subfolder=os.path.join(objects_folder, hash_value[:2])
     os.makedirs(objects_subfolder,exist_ok=True)
     object_file=os.path.join(objects_subfolder,hash_value[2:])
-    with open(object_file,"wb") as file:
-        file.write(compressed)
+    if not os.path.exists(object_file):
+        atomic_write(object_file,compressed,True)
     return hash_value
 
 def store_file(filename):
@@ -128,9 +144,9 @@ def add(args):
 
         index_data[filename]=hash_value
 
-        with open(index_file,'w')as json_file:
-            json.dump(index_data,json_file,indent=4)
+        atomic_write(index_file,index_data,False,True)
 
+        
 def write_tree(args):
     repo_path=find_repo(os.getcwd())
     if repo_path is None:
@@ -171,8 +187,8 @@ def commit(args):
     commit_content+=f"author Not implemented\n\n {args.message}"
     commit_hash=store_content(commit_content.encode("utf-8"))
 
-    with open(parent_path,'w') as f:
-        f.write(commit_hash)
+    with acquire_lock(parent_path):
+        atomic_write(parent_path,commit_hash)
     print(commit_hash)
 
 
@@ -268,7 +284,7 @@ def checkout(args):
             new_file.write(new_content)    
 
     index_file=os.path.join(repo_path,"index")
-    with open(index_file,'w')as f:
-        json.dump(new_tree,f,indent=4)
+    if os.path.exists(index_file):
+        atomic_write(index_file,new_tree,is_json=True)
 
     print(f"Switched to branch '{args.branch_name}'")
