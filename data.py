@@ -2,6 +2,27 @@ import json
 import os
 import hashlib
 import compression.zstd as zstd
+import contextlib
+import time
+
+
+@contextlib.contextmanager
+def acquire_lock(file_path):
+    lock_path=file_path+".lock"
+    while True:
+        try:
+            with open(lock_path,'x') as f:
+                f.write(str(os.getpid()))
+            break
+        except FileExistsError:
+            print(f"Waiting for lock on {file_path}...")
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        if(os.path.exists(lock_path)):
+            os.remove(lock_path)
+        
 
 
    
@@ -99,15 +120,16 @@ def add(args):
         print("could not find repo base folder. Make sure to run ding init first.")
         return
     index_file=os.path.join(repo_path,"index")
-    index_data={}
-    if os.path.isfile(index_file):
-        with open(index_file,'r')as json_file:
-            index_data=json.load(json_file)
+    with acquire_lock(index_file):
+        index_data={}
+        if os.path.isfile(index_file):
+            with open(index_file,'r')as json_file:
+                index_data=json.load(json_file)
 
-    index_data[filename]=hash_value
+        index_data[filename]=hash_value
 
-    with open(index_file,'w')as json_file:
-        json.dump(index_data,json_file,indent=4)
+        with open(index_file,'w')as json_file:
+            json.dump(index_data,json_file,indent=4)
 
 def write_tree(args):
     repo_path=find_repo(os.getcwd())
