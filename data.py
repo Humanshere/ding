@@ -168,27 +168,55 @@ def add(args):
     repo_root = os.path.dirname(repo_path)
     relative_path=os.path.relpath(absolute_path, repo_root)
     index_file=os.path.join(repo_path,"index")
-    if not os.path.exists(absolute_path):
+    if os.path.isdir(absolute_path):
+        new_data={}
+        for dirpath, dirnames, filenames in os.walk(absolute_path):
+            if ".ding" in dirnames:
+                dirnames.remove(".ding")
+            for filename in filenames:
+                full_path = os.path.join(dirpath, filename)
+                absolute_file_path=os.path.abspath(full_path)
+                relative_file_path=os.path.relpath(absolute_file_path, repo_root)
+                hash_value=store_file(absolute_file_path)
+                new_data[relative_file_path]=hash_value
+        with acquire_lock(index_file):
+                index_data={}
+                if os.path.isfile(index_file):
+                    with open(index_file,'r')as json_file:
+                        index_data=json.load(json_file)
+
+                for filepath in list(index_data.keys()):
+                    in_scope = (relative_path == ".") or filepath.startswith(relative_path + os.sep)
+                    
+                    if in_scope and filepath not in new_data:
+                        index_data.pop(filepath)
+                index_data.update(new_data)
+                atomic_write(index_file,index_data,False,True)
+
+
+    else:
+
+        if not os.path.exists(absolute_path):
+            with acquire_lock(index_file):
+                index_data={}
+                if os.path.isfile(index_file):
+                    with open(index_file,'r')as json_file:
+                        index_data=json.load(json_file)
+
+                index_data.pop(relative_path,None)
+
+                atomic_write(index_file,index_data,False,True)
+                return
+        hash_value=store_file(filename)
         with acquire_lock(index_file):
             index_data={}
             if os.path.isfile(index_file):
                 with open(index_file,'r')as json_file:
                     index_data=json.load(json_file)
 
-            index_data.pop(relative_path,None)
+            index_data[relative_path]=hash_value
 
             atomic_write(index_file,index_data,False,True)
-            return
-    hash_value=store_file(filename)
-    with acquire_lock(index_file):
-        index_data={}
-        if os.path.isfile(index_file):
-            with open(index_file,'r')as json_file:
-                index_data=json.load(json_file)
-
-        index_data[relative_path]=hash_value
-
-        atomic_write(index_file,index_data,False,True)
 
         
 def write_tree(args):
