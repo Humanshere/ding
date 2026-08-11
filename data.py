@@ -15,8 +15,16 @@ def acquire_lock(file_path):
                 f.write(str(os.getpid()))
             break
         except FileExistsError:
-            print(f"Waiting for lock on {file_path}...")
-            time.sleep(0.1)
+            try:
+                with open(lock_path, 'r') as f:
+                    old_pid = int(f.read().strip())
+                os.kill(old_pid, 0) # Sends a "null signal" to check if alive (Unix)
+                print(f"Waiting for lock on {file_path}...")
+                time.sleep(0.1)
+            except (ProcessLookupError, FileNotFoundError, ValueError):
+                if os.path.exists(lock_path):
+                    os.remove(lock_path)
+        continue 
     try:
         yield
     finally:
@@ -141,19 +149,18 @@ def decompress(oid):
         print("File does not exitst!")
         return
 
-    content=zstd.decompress(compressed).decode("utf-8")
+    content=zstd.decompress(compressed)
     return content
 
 def cat_file(args):
     oid=args.oid
-    print(decompress(oid))
+    print(decompress(oid).decode("utf-8"))
     
 
 
 def add(args):
     filename=args.file
     absolute_path=os.path.abspath(filename)
-    hash_value=store_file(filename)
     repo_path=find_repo(os.getcwd())
     if repo_path is None:
         print("could not find repo base folder. Make sure to run ding init first.")
@@ -161,6 +168,18 @@ def add(args):
     repo_root = os.path.dirname(repo_path)
     relative_path=os.path.relpath(absolute_path, repo_root)
     index_file=os.path.join(repo_path,"index")
+    if not os.path.exists(absolute_path):
+        with acquire_lock(index_file):
+            index_data={}
+            if os.path.isfile(index_file):
+                with open(index_file,'r')as json_file:
+                    index_data=json.load(json_file)
+
+            index_data.pop(relative_path,None)
+
+            atomic_write(index_file,index_data,False,True)
+            return
+    hash_value=store_file(filename)
     with acquire_lock(index_file):
         index_data={}
         if os.path.isfile(index_file):
@@ -206,6 +225,8 @@ def commit(args):
         with open(parent_path,'r') as f:
             parent_hash=f.read()
     hash_value=write_tree(args)
+    if not hash_value:
+        return
     commit_content=f"tree {hash_value}\n"
     if parent_hash:
         commit_content+=f"parent {parent_hash}\n"
@@ -238,10 +259,11 @@ def log(args):
 
     objects_folder=os.path.join(repo_path,"objects")
     while parent_hash:
-        content=decompress(parent_hash)
+        content=decompress(parent_hash).decode("utf-8")
         print(parent_hash)
         print(content)
-        words = content.split()
+        headers, message = content.split("\n\n", 1) 
+        words = headers.split()
         keyword="parent"
         if keyword in words:
             idx = words.index(keyword)
@@ -273,8 +295,8 @@ def branch(args):
 
 
     branch_file=os.path.join(repo_path,"refs","heads",args.branch_name)
-    with open(branch_file,'w') as f:
-        f.write(commit_hash)
+    with acquire_lock(branch_file):
+        atomic_write(branch_file, commit_hash)
 
 def checkout(args):
     repo_path=find_repo(os.getcwd())
@@ -288,12 +310,9 @@ def checkout(args):
     with open(branch_file,'r') as f:
         commit_hash=f.read()   
 
-    pointer_file=os.path.join(repo_path,"HEAD")
-    with open(pointer_file,'w') as f:
-        f.write("ref: refs/heads/"+args.branch_name)
-
-    content=decompress(commit_hash)
-    words = content.split()
+    content=decompress(commit_hash).decode("utf-8")
+    headers, message = content.split("\n\n", 1) 
+    words = headers.split()
     keyword="tree"
     if keyword in words:
         idx = words.index(keyword)
@@ -301,7 +320,7 @@ def checkout(args):
     else:
         tree_hash = None
 
-    new_tree=json.loads(decompress(tree_hash))
+    new_tree=json.loads(decompress(tree_hash).decode("utf-8"))
     index_file=os.path.join(repo_path,"index")
     curr_tree = {}
     if os.path.exists(index_file):
@@ -314,18 +333,30 @@ def checkout(args):
         if filepath not in curr_tree or blob_hash!=curr_tree[filepath]:
             files_to_add[filepath]=blob_hash
 
+    repo_root = os.path.dirname(repo_path)
+
 
     for filepath in curr_tree:
+        absolute_path = os.path.join(repo_root, filepath)
         if filepath not in new_tree:
-            os.remove(filepath)
-
+            os.remove(absolute_path)
+            try:
+                os.removedirs(os.path.dirname(absolute_path))
+            except OSError:
+                pass
 
 
     for filepath, blob_hash in files_to_add.items():
+        absolute_path = os.path.join(repo_root, filepath)
         new_content=decompress(blob_hash)
-        with open(filepath, 'w') as new_file:
+        os.makedirs(os.path.dirname(absolute_path), exist_ok=True)
+        with open(absolute_path, 'wb') as new_file:
             new_file.write(new_content)    
 
     atomic_write(index_file,new_tree,is_json=True)
+
+    pointer_file=os.path.join(repo_path,"HEAD")
+    with acquire_lock(pointer_file):
+        atomic_write(pointer_file, "ref: refs/heads/"+args.branch_name)
 
     print(f"Switched to branch '{args.branch_name}'")
